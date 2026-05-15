@@ -1,30 +1,50 @@
 # -*- coding: utf-8 -*-
 """
-CaRM App — Streamlit interface for BHE/BTES simulation.
+CaRM App — main entry point.
+
+Run with:
+    streamlit run app.py
 """
 
+import io
+import sys
 import tempfile
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import streamlit as st
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+from ui_inputs import (
+    render_ground_tab,
+    render_borehole_tab,
+    render_fluid_tab,
+    render_env_tab,
+    render_sim_tab,
+    render_field_tab,
+    render_bc_tab,
+    _make_schedule,
+    MONTHS,
+)
+from ui_results import (
+    render_ground_surface,
+    render_ground_middle,
+    render_ground_bottom,
+    render_borehole,
+    render_timeseries,
+    render_3d,
+    _build_slices,
+)
+
 from carm import (
-    BoreholeGeometry,
-    BoreholeMesh,
-    BoreholeThermalProperties,
-    Coaxial,
-    DoubleUtube,
-    Helical,
-    SingleUtube,
+    BoreholeGeometry, BoreholeMesh, BoreholeThermalProperties,
+    Coaxial, DoubleUtube, Helical, SingleUtube,
 )
 from carm import EnvironmentalProperties, EnvironmentalTimeSeries
-from carm import FieldInput
-from carm import Fluid
-from carm import GroundGeometry, GroundMesh
-from carm import PhysicalModel
-from carm import Simulation
+from carm import FieldInput, Fluid, GroundGeometry, GroundMesh
+from carm import PhysicalModel, Simulation
 
 # =============================================================================
 # Page config
@@ -34,316 +54,222 @@ st.set_page_config(page_title="CaRM", page_icon="🌡️", layout="wide")
 st.title("CaRM — Borehole Heat Exchanger Simulation")
 
 # =============================================================================
-# Sidebar: simulation mode
+# Sidebar
 # =============================================================================
 
 st.sidebar.header("Simulation mode")
-
 mode = st.sidebar.radio(
     "Configuration",
     ["Single BHE", "Multi BHE — Parallel", "Multi BHE — Series"],
 )
-
 pipe_type = st.sidebar.selectbox(
     "Pipe configuration",
     ["SingleUtube", "DoubleUtube", "Coaxial", "Helical"],
 )
 
-# =============================================================================
-# Sidebar: file uploads
-# =============================================================================
-
 st.sidebar.header("Input files")
-
-env_file = st.sidebar.file_uploader("Environmental data (input_env.xlsx)", type=["xlsx"])
-
+env_file     = st.sidebar.file_uploader("Environmental data (input_env.xlsx)", type=["xlsx"])
 spacing_file = None
 if mode in ["Multi BHE — Parallel", "Multi BHE — Series"]:
     spacing_file = st.sidebar.file_uploader("Field layout (spacing.xlsx)", type=["xlsx"])
 
 # =============================================================================
-# Main form: tabs
+# Input tabs  — Field Layout shown conditionally
 # =============================================================================
 
-tab_ground, tab_borehole, tab_fluid, tab_env, tab_sim = st.tabs(
-    ["Ground", "Borehole", "Fluid", "Environment", "Simulation"]
-)
-
-# -----------------------------------------------------------------------------
-# Tab: Ground
-# -----------------------------------------------------------------------------
+if mode == "Single BHE":
+    tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_bc = st.tabs(
+        ["Ground", "Borehole", "Fluid", "Environment", "Simulation", "Boundary Conditions"]
+    )
+    tab_field = None
+else:
+    tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_field, tab_bc = st.tabs(
+        ["Ground", "Borehole", "Fluid", "Environment", "Simulation",
+         "Field Layout", "Boundary Conditions"]
+    )
 
 with tab_ground:
-    st.subheader("Ground geometry & mesh")
-    col1, col2 = st.columns(2)
-    with col1:
-        Tg      = st.number_input("Undisturbed ground temperature Tg [°C]", value=13.0)
-        L       = st.number_input("Borehole active length L [m]", value=100.0)
-        L_sup   = st.number_input("Surface layer thickness L_sup [m]", value=1.0)
-        L_inf   = st.number_input("Bottom layer thickness L_inf [m]", value=10.0)
-        rn      = st.number_input("Far-field radius rn [m]", value=10.0,
-                                   help="Leave at 0 to auto-compute for multi-BHE fields",
-                                   min_value=0.0)
-    with col2:
-        n_mesh      = st.number_input("Radial mesh cells n_mesh [-]", value=20, min_value=1)
-        m_mesh      = st.number_input("Axial mesh cells m_mesh [-]", value=40, min_value=1)
-        m_mesh_sup  = st.number_input("Axial cells surface layer m_mesh_sup [-]", value=4, min_value=1)
-        m_mesh_inf  = st.number_input("Axial cells bottom layer m_mesh_inf [-]", value=40, min_value=1)
+    ground_p = render_ground_tab()
 
-    st.subheader("Ground stratification")
-    st.caption("Each row: (k [W/m·K], cp [J/kg·K], rho [kg/m³], thickness [m])")
-    n_layers = st.number_input("Number of layers", value=1, min_value=1, max_value=10)
-    stratification = []
-    for i in range(n_layers):
-        c1, c2, c3, c4 = st.columns(4)
-        k_s   = c1.number_input(f"k layer {i+1}",   value=1.8,    key=f"k_{i}")
-        cp_s  = c2.number_input(f"cp layer {i+1}",  value=947.37, key=f"cp_{i}")
-        rho_s = c3.number_input(f"rho layer {i+1}", value=1900.0, key=f"rho_{i}")
-        th_s  = c4.number_input(f"thick layer {i+1}", value=111.0, key=f"th_{i}")
-        stratification.append((k_s, cp_s, rho_s, th_s))
-
-# -----------------------------------------------------------------------------
-# Tab: Borehole
-# -----------------------------------------------------------------------------
-
-with tab_borehole:
-    st.subheader("Borehole geometry & grout")
-    col1, col2 = st.columns(2)
-    with col1:
-        Lbore   = st.number_input("Borehole length Lbore [m]", value=100.0)
-        D0      = st.number_input("Borehole diameter D0 [m]", value=0.15)
-        cp_0    = st.number_input("Grout specific heat cp_0 [J/kg·K]", value=1460.0)
-        rho_0   = st.number_input("Grout density rho_0 [kg/m³]", value=1655.0)
-        k0      = st.number_input("Grout thermal conductivity k0 [W/m·K]", value=1.8)
-
-    st.subheader(f"Pipe parameters — {pipe_type}")
-
-    if pipe_type == "SingleUtube":
-        col1, col2 = st.columns(2)
-        with col1:
-            Dpi         = st.number_input("Inner pipe diameter Dpi [m]", value=0.026)
-            pipe_thick  = st.number_input("Pipe wall thickness [m]", value=0.003)
-            pipe_spacing= st.number_input("Pipe spacing [m]", value=0.0823)
-        with col2:
-            Rp0         = st.number_input("Pipe-grout resistance Rp0 [K·m/W]", value=0.25)
-            RppB        = st.number_input("Pipe-pipe resistance RppB [K·m/W]", value=0.72)
-            n_pipes     = st.number_input("Number of pipes n_pipes", value=2, min_value=2)
-
-    elif pipe_type == "DoubleUtube":
-        col1, col2 = st.columns(2)
-        with col1:
-            Dpi         = st.number_input("Inner pipe diameter Dpi [m]", value=0.026)
-            pipe_thick  = st.number_input("Pipe wall thickness [m]", value=0.003)
-            pipe_spacing= st.number_input("Pipe spacing [m]", value=0.0823)
-        with col2:
-            Rp0         = st.number_input("Pipe-grout resistance Rp0 [K·m/W]", value=0.25)
-            RppB        = st.number_input("Pipe-pipe resistance RppB [K·m/W]", value=0.72)
-            RppA        = st.number_input("Pipe-pipe resistance RppA [K·m/W]", value=0.55)
-            n_pipes     = st.number_input("Number of pipes n_pipes", value=4, min_value=4)
-            connection  = st.selectbox("Connection", ["P", "S"])
-
-    elif pipe_type == "Coaxial":
-        col1, col2 = st.columns(2)
-        with col1:
-            Dp1i        = st.number_input("Inner pipe inner diameter Dp1i [m]", value=0.032)
-            Dp2i        = st.number_input("Outer pipe inner diameter Dp2i [m]", value=0.110)
-            pipe1_thick = st.number_input("Inner pipe wall thickness [m]", value=0.003)
-            pipe2_thick = st.number_input("Outer pipe wall thickness [m]", value=0.006)
-        with col2:
-            k_pipe      = st.number_input("Pipe thermal conductivity k_pipe [W/m·K]", value=0.38)
-            supply_and_return = st.selectbox("Supply/return", ["1_2", "2_1"],
-                                              help="1_2: supply in inner pipe; 2_1: supply in annulus")
-
-    elif pipe_type == "Helical":
-        col1, col2 = st.columns(2)
-        with col1:
-            Dpi1        = st.number_input("Pipe 1 inner diameter Dpi1 [m]", value=0.0204)
-            Dpi2        = st.number_input("Pipe 2 inner diameter Dpi2 [m]", value=0.0204)
-            pipe_thick  = st.number_input("Pipe wall thickness [m]", value=0.0023)
-            k_pipe      = st.number_input("Pipe thermal conductivity k_pipe [W/m·K]", value=0.38)
-        with col2:
-            rih         = st.number_input("Helix inner radius rih [m]", value=0.045)
-            N           = st.number_input("Number of turns N [-]", value=8, min_value=1)
-            P           = st.number_input("Helix pitch P [m]", value=1.5)
-            Lp2tot      = st.number_input("Total length outer pipe Lp2tot [m]", value=12.0)
-            supply_and_return = st.selectbox("Supply/return", ["1_2", "2_1"])
-
-# -----------------------------------------------------------------------------
-# Tab: Fluid
-# -----------------------------------------------------------------------------
+with tab_bore:
+    bore_p = render_borehole_tab(pipe_type)
 
 with tab_fluid:
-    st.subheader("Fluid thermal properties")
-    col1, col2 = st.columns(2)
-    with col1:
-        k_w   = st.number_input("Thermal conductivity k_w [W/m·K]", value=0.5687)
-        rho_w = st.number_input("Density rho_w [kg/m³]", value=1000.14)
-    with col2:
-        cp_w  = st.number_input("Specific heat cp_w [J/kg·K]", value=4207.4)
-        ni_w  = st.number_input("Kinematic viscosity ni_w [m²/s]", value=1.496e-6, format="%.3e")
-
-# -----------------------------------------------------------------------------
-# Tab: Environment
-# -----------------------------------------------------------------------------
+    fluid_p = render_fluid_tab()
 
 with tab_env:
-    st.subheader("Environmental properties")
-    col1, col2 = st.columns(2)
-    with col1:
-        Tm          = st.number_input("Mean annual air temperature Tm [°C]", value=13.0)
-        R_ext       = st.number_input("External thermal resistance R_ext [m²·K/W]", value=0.04)
-        absorptance = st.number_input("Surface absorptance [-]", value=0.7, min_value=0.0, max_value=1.0)
-        eps         = st.number_input("Surface emittance [-]", value=0.95, min_value=0.0, max_value=1.0)
-    with col2:
-        At          = st.number_input("Annual temperature amplitude At [K]", value=10.0)
-        tau_y       = st.number_input("Year duration tau_y [s]", value=365 * 24 * 3600)
-        tau_shift   = st.number_input("Temperature phase shift tau_shift [s]", value=210 * 24 * 3600)
-
-# -----------------------------------------------------------------------------
-# Tab: Simulation
-# -----------------------------------------------------------------------------
+    env_p = render_env_tab()
 
 with tab_sim:
-    st.subheader("Simulation parameters")
-    col1, col2 = st.columns(2)
-    with col1:
-        dt      = st.number_input("Time step dt [s]", value=3600)
-        n_steps = st.number_input("Number of steps n_steps [-]", value=276, min_value=1)
-        Tf1_val = st.number_input("Inlet fluid temperature Tf1 [°C]", value=2.0)
-        mw_val  = st.number_input("Mass flow rate mw_tot [kg/s]", value=0.1657)
+    sim_p = render_sim_tab()
 
-    if mode == "Multi BHE — Series":
-        st.subheader("Series groups")
-        st.caption("Define each group as a comma-separated list of borehole IDs (0-indexed)")
-        n_bhes   = st.number_input("Total number of BHEs", value=9, min_value=1)
-        n_groups = st.number_input("Number of series groups", value=3, min_value=1)
-        groups = {}
-        for g in range(n_groups):
-            raw = st.text_input(f"Group {g} borehole IDs", value=", ".join(str(x) for x in range(g*3, g*3+3)), key=f"grp_{g}")
-            groups[f"group_{g}"] = [int(x.strip()) for x in raw.split(",")]
-    elif mode == "Multi BHE — Parallel":
-        n_bhes = st.number_input("Total number of BHEs", value=9, min_value=1)
-        col1, col2 = st.columns(2)
-        with col1:
-            x_min = st.number_input("Field x_min [m]", value=-2.5)
-            y_min = st.number_input("Field y_min [m]", value=-2.5)
-        with col2:
-            x_max = st.number_input("Field x_max [m]", value=12.5)
-            y_max = st.number_input("Field y_max [m]", value=12.5)
+field_p = {}
+if tab_field is not None:
+    with tab_field:
+        field_p = render_field_tab(mode)
+
+# n_inlets depends on mode and groups — compute a best-effort value for BC tab
+_n_inlets_est = 1
+if mode == "Multi BHE — Parallel":
+    _n_inlets_est = field_p.get("n_bhes", 1)
+elif mode == "Multi BHE — Series":
+    _n_inlets_est = field_p.get("n_groups", 1)
+
+with tab_bc:
+    bc_p = render_bc_tab(
+        mode=mode,
+        n_steps_ref=sim_p["n_steps"],
+        dt_ref=sim_p["dt"],
+        n_inlets_ref=_n_inlets_est,
+        field_p=field_p,
+    )
 
 # =============================================================================
-# Run button
+# Run
 # =============================================================================
 
 st.divider()
 run = st.button("▶ Run simulation", type="primary", use_container_width=True)
 
 if run:
-
-    # --- validate uploads ---
     if env_file is None:
         st.error("Please upload the environmental data file (input_env.xlsx).")
         st.stop()
-
     if mode in ["Multi BHE — Parallel", "Multi BHE — Series"] and spacing_file is None:
         st.error("Please upload the field layout file (spacing.xlsx).")
         st.stop()
+    if bc_p.get("bc_mode") == "file" and bc_p.get("bc_file_path") is None:
+        st.error("Please upload the boundary conditions file.")
+        st.stop()
 
-    with st.spinner("Running CaRM simulation..."):
+    with st.spinner("Running CaRM simulation…"):
 
-        # --- save uploads to temp files ---
+        # --- temp env file ---
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
             f.write(env_file.read())
             env_path = Path(f.name)
 
-        # --- build objects ---
-        fluid = Fluid(k_w=k_w, rho_w=rho_w, cp_w=cp_w, ni_w=ni_w)
-
-        bore_geom      = BoreholeGeometry(Lbore=Lbore, D0=D0)
-        bore_mesh      = BoreholeMesh(m_mesh=m_mesh)
-        bore_th_props  = BoreholeThermalProperties(cp_0=cp_0, rho_0=rho_0, k0=k0)
+        # --- CaRM objects ---
+        fluid         = Fluid(**fluid_p)
+        bore_geom     = BoreholeGeometry(Lbore=bore_p["Lbore"], D0=bore_p["D0"])
+        bore_mesh     = BoreholeMesh(m_mesh=ground_p["m_mesh"])
+        bore_th_props = BoreholeThermalProperties(
+            cp_0=bore_p["cp_0"], rho_0=bore_p["rho_0"], k0=bore_p["k0"]
+        )
 
         if pipe_type == "SingleUtube":
             props_b = SingleUtube(
                 geom=bore_geom, mesh=bore_mesh, thermalprops=bore_th_props, fluid=fluid,
-                Rp0=Rp0, RppB=RppB, pipe_spacing=pipe_spacing,
-                pipe_thick=pipe_thick, Dpi=Dpi, n_pipes=n_pipes,
+                Rp0=bore_p["Rp0"], RppB=bore_p["RppB"],
+                pipe_spacing=bore_p["pipe_spacing"], pipe_thick=bore_p["pipe_thick"],
+                Dpi=bore_p["Dpi"], n_pipes=bore_p["n_pipes"],
             )
         elif pipe_type == "DoubleUtube":
             props_b = DoubleUtube(
                 geom=bore_geom, mesh=bore_mesh, thermalprops=bore_th_props, fluid=fluid,
-                Rp0=Rp0, RppB=RppB, RppA=RppA, pipe_spacing=pipe_spacing,
-                pipe_thick=pipe_thick, Dpi=Dpi, n_pipes=n_pipes, connection=connection,
+                Rp0=bore_p["Rp0"], RppB=bore_p["RppB"], RppA=bore_p["RppA"],
+                pipe_spacing=bore_p["pipe_spacing"], pipe_thick=bore_p["pipe_thick"],
+                Dpi=bore_p["Dpi"], n_pipes=bore_p["n_pipes"],
+                connection=bore_p["connection"],
             )
         elif pipe_type == "Coaxial":
             props_b = Coaxial(
                 geom=bore_geom, mesh=bore_mesh, thermalprops=bore_th_props, fluid=fluid,
-                supply_and_return=supply_and_return,
-                Dp1i=Dp1i, Dp2i=Dp2i,
-                pipe1_thick=pipe1_thick, pipe2_thick=pipe2_thick,
-                k_pipe1=k_pipe, k_pipe2=k_pipe,
+                supply_and_return=bore_p["supply_and_return"],
+                Dp1i=bore_p["Dp1i"], Dp2i=bore_p["Dp2i"],
+                pipe1_thick=bore_p["pipe1_thick"], pipe2_thick=bore_p["pipe2_thick"],
+                k_pipe1=bore_p["k_pipe1"], k_pipe2=bore_p["k_pipe2"],
             )
         elif pipe_type == "Helical":
             props_b = Helical(
                 geom=bore_geom, mesh=bore_mesh, thermalprops=bore_th_props, fluid=fluid,
-                Dpi1=Dpi1, Dpi2=Dpi2, P=P, Lp2tot=Lp2tot,
-                supply_and_return=supply_and_return,
-                rih=rih, pipe_thick=pipe_thick, N=N, k_pipe=k_pipe,
+                Dpi1=bore_p["Dpi1"], Dpi2=bore_p["Dpi2"],
+                P=bore_p["P_hel"], Lp2tot=bore_p["Lp2tot"],
+                supply_and_return=bore_p["supply_and_return"],
+                rih=bore_p["rih"], pipe_thick=bore_p["pipe1_thick"],
+                N=bore_p["N_hel"], k_pipe=bore_p["k_pipe"],
             )
 
-        rn_val = rn if (mode == "Single BHE" and rn > 0) else None
-        ground_geom = GroundGeometry(rn=rn_val, D0=D0, L=L, L_sup=L_sup, L_inf=L_inf)
+        rn_val      = ground_p["rn"] if (mode == "Single BHE" and ground_p["rn"] > 0) else None
+        ground_geom = GroundGeometry(
+            rn=rn_val, D0=bore_p["D0"], L=ground_p["L"],
+            L_sup=ground_p["L_sup"], L_inf=ground_p["L_inf"],
+        )
         ground_mesh = GroundMesh(
-            n_mesh=n_mesh, m_mesh=m_mesh,
-            m_mesh_sup=m_mesh_sup, m_mesh_inf=m_mesh_inf,
+            n_mesh=ground_p["n_mesh"], m_mesh=ground_p["m_mesh"],
+            m_mesh_sup=ground_p["m_mesh_sup"], m_mesh_inf=ground_p["m_mesh_inf"],
         )
 
-        env_input = EnvironmentalTimeSeries.from_excel(Tm=Tm, path=env_path)
+        env_input = EnvironmentalTimeSeries.from_excel(Tm=env_p["Tm"], path=env_path)
         env_props = EnvironmentalProperties(
-            R_ext=R_ext, absorptance=absorptance, eps=eps,
-            At=At, tau=0, tau_y=tau_y, tau_shift=tau_shift,
+            R_ext=env_p["R_ext"], absorptance=env_p["absorptance"], eps=env_p["eps"],
+            At=env_p["At"], tau=0, tau_y=env_p["tau_y"], tau_shift=env_p["tau_shift"],
         )
 
-        # --- field (multi only) ---
-        if mode == "Multi BHE — Parallel":
+        # --- field ---
+        myfield = None
+        if mode in ["Multi BHE — Parallel", "Multi BHE — Series"]:
             with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
                 f.write(spacing_file.read())
-                field_path = Path(f.name)
-            myfield = FieldInput(n_bhes=n_bhes, xmin=x_min, ymin=y_min, xmax=x_max, ymax=y_max, rb=D0/2)
-            myfield.from_excel(field_path)
-        elif mode == "Multi BHE — Series":
-            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-                f.write(spacing_file.read())
-                field_path = Path(f.name)
-            myfield = FieldInput(n_bhes=n_bhes, xmin=x_min, ymin=y_min, xmax=x_max, ymax=y_max, rb=D0/2, layout="irregular")
-            myfield.from_excel(field_path)
+                field_path_tmp = Path(f.name)
+            myfield = FieldInput(
+                n_bhes=field_p["n_bhes"],
+                xmin=field_p["x_min"], ymin=field_p["y_min"],
+                xmax=field_p["x_max"], ymax=field_p["y_max"],
+                rb=bore_p["D0"] / 2.0,
+                layout=field_p["layout"],
+            )
+            myfield.from_excel(field_path_tmp)
 
         model_kwargs = dict(
             ground_geom=ground_geom, ground_mesh=ground_mesh,
-            borehole=props_b, fluid=fluid, Tg=Tg, stratification=stratification,
+            borehole=props_b, fluid=fluid,
+            Tg=ground_p["Tg"], stratification=ground_p["stratification"],
         )
-        if mode != "Single BHE":
+        if myfield is not None:
             model_kwargs["fieldinput"] = myfield
-
         model = PhysicalModel(**model_kwargs)
 
-        # --- arrays ---
+        # --- inlet count ---
+        n_steps = sim_p["n_steps"]
+        dt      = sim_p["dt"]
         if mode == "Single BHE":
             n_inlets = 1
         elif mode == "Multi BHE — Parallel":
-            n_inlets = n_bhes
+            n_inlets = field_p["n_bhes"]
         else:
-            n_inlets = n_groups
+            n_inlets = field_p["n_groups"]
 
-        Tf1_arr   = np.full((n_inlets, n_steps), Tf1_val, dtype=np.float64)
-        mw_arr    = np.full((n_inlets, n_steps), mw_val, dtype=np.float64)
+        # --- build Tf1_arr and mw_arr ---
+        if bc_p["bc_mode"] == "schedule":
+            Tf1_arr, mw_arr = _make_schedule(
+                n_steps=n_steps, dt=dt,
+                active_months=bc_p["active_months"],
+                active_hours=bc_p["active_hours"],
+                Tf1_val=bc_p["Tf1_val"],
+                mw_val=bc_p["mw_val"],
+                n_inlets=n_inlets,
+            )
+        else:
+            # from file
+            df_bc = pd.read_excel(bc_p["bc_file_path"])
+            tf1_raw = df_bc[bc_p["col_tf1"]].to_numpy()[:n_steps]
+            mw_raw  = df_bc[bc_p["col_mw"]].to_numpy()[:n_steps]
+            if bc_p["same_profile"]:
+                Tf1_arr = np.tile(tf1_raw, (n_inlets, 1))
+                mw_arr  = np.tile(mw_raw,  (n_inlets, 1))
+            else:
+                # one sheet per inlet — fall back to tiling if not enough columns
+                Tf1_arr = np.tile(tf1_raw, (n_inlets, 1))
+                mw_arr  = np.tile(mw_raw,  (n_inlets, 1))
 
+        # --- simulation ---
         sim_kwargs = dict(
             model=model, envinput=env_input, timesteps=dt, n_steps=n_steps,
             envprops=env_props, mw_tot=mw_arr, Tf1=Tf1_arr,
         )
         if mode == "Multi BHE — Series":
-            sim_kwargs["groups"] = groups
+            sim_kwargs["groups"] = field_p["groups"]
 
         simulation = Simulation(**sim_kwargs)
 
@@ -356,86 +282,99 @@ if run:
 
     st.success("Simulation complete!")
 
-    # =========================================================================
-    # Post-processing & plots
-    # =========================================================================
+    supply_and_return = bore_p.get("supply_and_return", "1_2")
+    st.session_state.update({
+        "T_history":         T_history,
+        "simulation":        simulation,
+        "model":             model,
+        "props_b":           props_b,
+        "Tf1_arr":           Tf1_arr,
+        "mw_arr":            mw_arr,
+        "pipe_type":         pipe_type,
+        "supply_and_return": supply_and_return,
+        "params": dict(
+            n_steps=n_steps, dt=dt,
+            m_mesh=ground_p["m_mesh"], n_mesh=ground_p["n_mesh"],
+            m_mesh_sup=ground_p["m_mesh_sup"], m_mesh_inf=ground_p["m_mesh_inf"],
+            L_sup=ground_p["L_sup"], L_inf=ground_p["L_inf"],
+            D0=bore_p["D0"], cp_w=fluid_p["cp_w"], Lbore=bore_p["Lbore"],
+        ),
+    })
 
-    nsup    = m_mesh_sup + 1
-    nground = n_mesh * m_mesh
-    ref_bhe = 0
+# =============================================================================
+# Results
+# =============================================================================
 
-    time  = np.arange(dt, dt * (n_steps + 1), dt, dtype=np.float64)
-    dz    = model.ground[0].dz
-    depth = np.arange(-L_sup, -L_sup - dz * m_mesh, -dz)
+if "T_history" not in st.session_state:
+    st.stop()
 
-    slice_shell = [nsup + nground + j * props_b.n_equations for j in range(m_mesh)]
-    slice_down  = [nsup + nground + j * props_b.n_equations + (props_b.n_equations - 2) for j in range(m_mesh)]
-    slice_up    = [nsup + nground + j * props_b.n_equations + (props_b.n_equations - 1) for j in range(m_mesh)]
+T_history         = st.session_state["T_history"]
+simulation        = st.session_state["simulation"]
+model             = st.session_state["model"]
+props_b           = st.session_state["props_b"]
+Tf1_arr           = st.session_state["Tf1_arr"]
+mw_arr            = st.session_state["mw_arr"]
+pipe_type_r       = st.session_state["pipe_type"]
+supply_and_return = st.session_state["supply_and_return"]
+p                 = st.session_state["params"]
 
-    Tfout = T_history[1:, ref_bhe, nsup + nground + (props_b.n_equations - 1)]
+n_steps    = p["n_steps"];    dt         = p["dt"]
+m_mesh     = p["m_mesh"];     n_mesh     = p["n_mesh"]
+m_mesh_sup = p["m_mesh_sup"]; m_mesh_inf = p["m_mesh_inf"]
+L_sup      = p["L_sup"];      L_inf      = p["L_inf"]
+D0         = p["D0"];         cp_w       = p["cp_w"]
 
-    # --- Plot 1: outlet fluid temperature ---
-    st.subheader("Outlet fluid temperature")
-    fig, ax = plt.subplots(figsize=(7, 3))
-    ax.plot(time / 3600, Tfout, color="tab:red", label=r"$T_{f,out}$")
-    ax.axhline(Tf1_val, color="tab:blue", linestyle="--", label=r"$T_{f,in}$")
-    ax.set_xlabel("Time [h]")
-    ax.set_ylabel("Temperature [°C]")
-    ax.legend(fontsize=8)
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.4)
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+n_bhes  = T_history.shape[1]
+nsup    = m_mesh_sup + 1
+nground = n_mesh * m_mesh
+dz      = model.ground[0].dz
+depth   = np.arange(-L_sup, -L_sup - dz * m_mesh, -dz)
+time_h  = np.arange(1, n_steps + 1) * dt / 3600
 
-    # --- Plot 2: shell temperature vertical profile ---
-    steps_plot = [max(1, n_steps // 4), n_steps // 2, n_steps]
-    steps_plot = sorted(set(min(s, n_steps) for s in steps_plot))
+slices = _build_slices(nsup, nground, props_b, m_mesh)
 
-    st.subheader("Shell temperature — vertical profile")
-    fig, ax = plt.subplots(figsize=(4, 4))
-    for s in steps_plot:
-        ax.plot(T_history[s, ref_bhe, slice_shell], depth, label=f"Step {s}")
-    ax.set_xlabel("Temperature [°C]")
-    ax.set_ylabel("Depth [m]")
-    ax.legend(fontsize=8)
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.4)
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+st.divider()
+st.header("Results")
 
-    # --- Plot 3: ground temperature heatmap ---
-    st.subheader("Ground temperature heatmap")
-    r0     = model.ground[0].r0
-    rn_out = model.ground[0].rn
-    radius = np.linspace(D0 / 2, rn_out, n_mesh)
-    R, D   = np.meshgrid(radius, depth)
+(res_sup, res_mid, res_bot, res_bore, res_ts, res_3d) = st.tabs([
+    "Ground — Surface",
+    "Ground — Middle",
+    "Ground — Bottom",
+    "Borehole",
+    "Time series",
+    "3-D Field",
+])
 
-    fig, axes = plt.subplots(1, len(steps_plot), figsize=(5 * len(steps_plot), 4))
-    if len(steps_plot) == 1:
-        axes = [axes]
-    T_all = np.array([
-        T_history[s, ref_bhe, nsup: nsup + nground].reshape(m_mesh, n_mesh)
-        for s in steps_plot
-    ])
-    vmin, vmax = T_all.min(), T_all.max()
-    for i, (s, ax) in enumerate(zip(steps_plot, axes)):
-        pc = ax.pcolormesh(R, D, T_all[i], cmap="RdYlGn_r", shading="gouraud", vmin=vmin, vmax=vmax)
-        fig.colorbar(pc, ax=ax, label="Temperature [°C]")
-        ax.set_xlabel("Radius [m]")
-        ax.set_ylabel("Depth [m]")
-        ax.set_title(f"Step {s}")
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+with res_sup:
+    render_ground_surface(T_history, n_bhes, nsup, dt, n_steps, L_sup)
 
-    # --- Raw data download ---
-    st.subheader("Download results")
-    import io
-    buf = io.BytesIO()
-    np.save(buf, T_history)
-    st.download_button(
-        label="Download T_history (.npy)",
-        data=buf.getvalue(),
-        file_name="T_history.npy",
-        mime="application/octet-stream",
-    )
+with res_mid:
+    render_ground_middle(T_history, n_bhes, nsup, nground, dt, n_steps,
+                         depth, n_mesh, m_mesh, model, D0)
+
+with res_bot:
+    render_ground_bottom(T_history, n_bhes, nsup, nground, dt, n_steps,
+                         depth, m_mesh, m_mesh_inf, dz, props_b)
+
+with res_bore:
+    render_borehole(T_history, n_bhes, slices, depth, n_steps, dt,
+                    pipe_type_r, supply_and_return, m_mesh)
+
+with res_ts:
+    render_timeseries(T_history, simulation, n_bhes, nsup, nground,
+                      slices, props_b, Tf1_arr, mw_arr, cp_w, time_h, n_steps, dt)
+
+with res_3d:
+    render_3d(T_history, model, n_bhes, nsup, nground, slices,
+              depth, n_mesh, m_mesh, n_steps, D0)
+
+# raw download
+st.divider()
+buf = io.BytesIO()
+np.save(buf, T_history)
+st.download_button(
+    label="⬇ Download full T_history (.npy)",
+    data=buf.getvalue(),
+    file_name="T_history.npy",
+    mime="application/octet-stream",
+)
