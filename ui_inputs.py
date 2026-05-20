@@ -148,6 +148,22 @@ def render_borehole_tab(pipe_type: str):
             pipe_params["N_hel"]   = N_hel
             pipe_params["Lp2tot"]  = Lp2tot
 
+    # --- cross-section diagram ---
+    _svg_map = {
+        "SingleUtube": "single_utube.svg",
+        "DoubleUtube": "double_utube.svg",
+    }
+    _svg_file = _svg_map.get(pipe_type)
+    if _svg_file:
+        import pathlib as _pl
+        _svg_path = _pl.Path(__file__).parent / _svg_file
+        if _svg_path.exists():
+            st.divider()
+            st.caption("Pipe configuration — cross section")
+            col_img, _ = st.columns([1, 1])
+            with col_img:
+                st.image(str(_svg_path))
+
     return dict(Lbore=Lbore, D0=D0, cp_0=cp_0, rho_0=rho_0, k0=k0, **pipe_params)
 
 
@@ -235,18 +251,42 @@ def render_env_tab():
         )
 
     st.subheader("Environmental properties")
+    import datetime as _dt_env
+
+    def _doy_seconds(date: _dt_env.date) -> float:
+        return float((date - _dt_env.date(date.year, 1, 1)).days * 86400)
+
     col1, col2 = st.columns(2)
     with col1:
-        Tm        = st.number_input("Mean annual air temperature Tm [°C]", value=13.0)
-        R_ext     = st.number_input("External thermal resistance R_ext [m²·K/W]", value=0.04)
-        At        = st.number_input("Annual temperature amplitude At [K]", value=10.0)
+        Tm    = st.number_input("Mean annual air temperature Tm [°C]", value=13.0)
+        R_ext = st.number_input("External thermal resistance R_ext [m²·K/W]", value=0.04)
+        At    = st.number_input("Annual temperature amplitude At [K]", value=10.0)
+        tau_y = st.number_input("Year duration tau_y [s]", value=365 * 24 * 3600)
     with col2:
-        tau_y     = st.number_input("Year duration tau_y [s]", value=365 * 24 * 3600)
-        tau_shift = st.number_input("Phase shift tau_shift [s]", value=210 * 24 * 3600)
+        st.markdown("**Simulation start date (τ)**")
+        st.caption("Seconds from Jan 1 to the simulation start — used as τ in EnvironmentalProperties.")
+        tau_date = st.date_input(
+            "Simulation start",
+            value=_dt_env.date(2024, 1, 1),
+            key="env_tau_date",
+        )
+        tau = _doy_seconds(tau_date)
+        st.metric("τ [s]", f"{tau:,.0f}")
+
+        st.markdown("**Date of minimum surface temperature (τ_shift)**")
+        st.caption("Typically mid-February — day when surface temperature reaches its annual minimum.")
+        shift_date = st.date_input(
+            "Date of minimum T",
+            value=_dt_env.date(2024, 2, 14),
+            key="env_tau_shift_date",
+        )
+        tau_shift = _doy_seconds(shift_date)
+        st.metric("τ_shift [s]", f"{tau_shift:,.0f}")
 
     return dict(
         Tm=Tm, R_ext=R_ext, absorptance=absorptance, eps=eps,
-        At=At, tau_y=tau_y, tau_shift=tau_shift,
+        At=At, tau_y=tau_y, tau=tau, tau_shift=tau_shift,
+        sim_start=tau_date,
     )
 
 
@@ -268,7 +308,7 @@ def render_sim_tab():
 # =============================================================================
 
 def render_field_tab(mode: str):
-    """Render field layout + series groups. Returns dict or None for Single BHE."""
+    """Render field layout. For Series, groups are defined dynamically."""
     if mode == "Single BHE":
         st.info("Field layout is not applicable for Single BHE configuration.")
         return {}
@@ -279,9 +319,8 @@ def render_field_tab(mode: str):
 
     if layout == "regular" and mode == "Multi BHE — Series":
         st.warning(
-            "For series configuration the FLS thermal interaction model "
-            "requires **irregular** layout with explicit borehole coordinates. "
-            "Switch to irregular or the simulation may produce incorrect results.",
+            "For series configuration the FLS model requires **irregular** layout "
+            "with explicit borehole coordinates."
         )
 
     col1, col2 = st.columns(2)
@@ -299,150 +338,236 @@ def render_field_tab(mode: str):
 
     if mode == "Multi BHE — Series":
         st.subheader("Series groups")
-        st.caption("Comma-separated borehole IDs (0-indexed) per group")
-        n_groups = int(st.number_input("Number of series groups", value=3, min_value=1))
-        groups = {}
-        for g in range(n_groups):
-            raw = st.text_input(
-                f"Group {g} borehole IDs",
-                value=", ".join(str(x) for x in range(g * 3, g * 3 + 3)),
-                key=f"grp_{g}",
+        st.caption(
+            "Add groups with the button below. Each group is a chain of boreholes "
+            "in series. BHE IDs are 0-indexed and comma-separated."
+        )
+
+        # session state for groups list
+        if "series_groups" not in st.session_state:
+            st.session_state["series_groups"] = [
+                {"ids": "0, 1, 2"},
+                {"ids": "3, 4, 5"},
+                {"ids": "6, 7, 8"},
+            ]
+
+        to_del = []
+        for g, grp in enumerate(st.session_state["series_groups"]):
+            c1, c2 = st.columns([5, 1])
+            new_ids = c1.text_input(
+                f"Group {g} — BHE IDs",
+                value=grp["ids"],
+                key=f"grp_ids_{g}",
             )
-            groups[f"group_{g}"] = [int(x.strip()) for x in raw.split(",")]
+            st.session_state["series_groups"][g]["ids"] = new_ids
+            if c2.button("✕", key=f"del_grp_{g}"):
+                to_del.append(g)
+
+        for g in reversed(to_del):
+            st.session_state["series_groups"].pop(g)
+
+        if st.button("＋ Add group"):
+            n_existing = len(st.session_state["series_groups"])
+            st.session_state["series_groups"].append({"ids": str(n_existing * 3)})
+
+        # build groups dict
+        groups = {}
+        for g, grp in enumerate(st.session_state["series_groups"]):
+            try:
+                ids = [int(x.strip()) for x in grp["ids"].split(",") if x.strip()]
+            except ValueError:
+                ids = []
+            groups[f"group_{g}"] = ids
+
+        n_groups = len(groups)
         out["n_groups"] = n_groups
         out["groups"]   = groups
+        st.caption(f"{n_groups} group(s) defined, {sum(len(v) for v in groups.values())} BHEs assigned.")
 
     return out
 
 
 # =============================================================================
-# Tab: Boundary Conditions  (Tf1 and mw profiles)
+# Tab: Plant Schedule
 # =============================================================================
 
-MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+import datetime as _dt
 
 
-def _make_schedule(n_steps: int, dt: int, active_months: list,
-                   active_hours: tuple, Tf1_val: float, mw_val: float,
-                   n_inlets: int) -> tuple:
+def _date_to_tau(date: _dt.date) -> float:
+    jan1 = _dt.date(date.year, 1, 1)
+    return float((date - jan1).days * 86400)
+
+
+def _build_mw_tf1_from_schedule(
+    n_steps: int, dt_s: int,
+    sim_start: _dt.date,
+    circuits: list,
+) -> tuple:
     """
-    Build Tf1_arr and mw_arr from a constant value + monthly/hourly schedule.
-    Off-hours: mw = 0, Tf1 = Tf1_val (irrelevant but non-zero).
+    Build Tf1_arr and mw_arr from per-circuit schedule.
+
+    Each circuit dict:
+        Tf1_val : float
+        mw_val  : float
+        periods : list of (start_date, end_date, hour_on, hour_off)
+                  Within each period, pump is on from hour_on to hour_off every day.
+                  Outside all periods: mw = 0.
     """
-    Tf1_arr = np.full((n_inlets, n_steps), Tf1_val, dtype=np.float64)
-    mw_arr  = np.zeros((n_inlets, n_steps), dtype=np.float64)
+    n_inlets     = len(circuits)
+    Tf1_arr      = np.zeros((n_inlets, n_steps), dtype=np.float64)
+    mw_arr       = np.zeros((n_inlets, n_steps), dtype=np.float64)
+    sim_start_dt = _dt.datetime(sim_start.year, sim_start.month, sim_start.day, 0)
 
-    dt_h = dt / 3600.0  # timestep in hours
-    # cumulative hours per month
-    cum_hours = np.cumsum([0] + [d * 24 for d in MONTH_DAYS])
-
-    for step in range(n_steps):
-        t_h = step * dt_h          # hour of simulation
-        t_year = t_h % 8760        # hour within the year
-        # which month?
-        month_idx = next(
-            (i for i in range(12) if cum_hours[i] <= t_year < cum_hours[i + 1]),
-            11,
-        )
-        # which hour of day?
-        hour_of_day = int(t_year % 24)
-        h_start, h_end = active_hours
-        if (MONTHS[month_idx] in active_months) and (h_start <= hour_of_day < h_end):
-            mw_arr[:, step] = mw_val
+    for i, circ in enumerate(circuits):
+        Tf1_arr[i, :] = circ["Tf1_val"]
+        for (pd_start, pd_end, h_on, h_off) in circ["periods"]:
+            # iterate day by day within the period
+            day = pd_start
+            while day <= pd_end:
+                for h in range(h_on, h_off):
+                    t = _dt.datetime(day.year, day.month, day.day, h)
+                    delta_s = (t - sim_start_dt).total_seconds()
+                    if 0 <= delta_s < n_steps * dt_s:
+                        step = int(delta_s / dt_s)
+                        mw_arr[i, step] = circ["mw_val"]
+                day += _dt.timedelta(days=1)
 
     return Tf1_arr, mw_arr
 
 
-def render_bc_tab(mode: str, n_steps_ref: int, dt_ref: int,
-                  n_inlets_ref: int, field_p: dict):
+def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
+                              field_p: dict, sim_start):
     """
-    Boundary conditions: Tf1 and mw profiles.
-    n_inlets_ref: 1 for Single, n_bhes for Parallel, n_groups for Series.
+    Plant Schedule tab.
+    sim_start comes from env_p["sim_start"] (set in Environment tab).
+    Returns dict with keys:
+        schedule_mode : "calendar" | "file"
+        circuits      : list of circuit dicts  (calendar only)
+        bc_file_path, col_tf1, col_mw, same_profile  (file only)
     """
-    st.subheader("Inlet conditions")
-
-    bc_mode = st.radio(
-        "Input mode",
-        ["Constant + schedule", "From file (Excel)"],
+    # --- input mode ---
+    schedule_mode = st.radio(
+        "Inlet profile mode",
+        ["Calendar schedule", "From file (Excel)"],
         horizontal=True,
-        key="bc_mode",
+        key="schedule_mode",
     )
 
-    if bc_mode == "Constant + schedule":
-        col1, col2 = st.columns(2)
-        with col1:
-            Tf1_val = st.number_input("Inlet fluid temperature Tf1 [°C]", value=2.0)
-            mw_val  = st.number_input("Mass flow rate per circuit mw [kg/s]", value=0.1657)
-        with col2:
-            h_start = st.slider("Operation start [h of day]", 0, 23, 0)
-            h_end   = st.slider("Operation end [h of day]",   1, 24, 24)
-
-        active_months = st.multiselect(
-            "Active months",
-            MONTHS,
-            default=MONTHS,
-            key="bc_months",
-        )
-
-        if not active_months:
-            st.warning("Select at least one active month.")
-
+    # ── From file ──────────────────────────────────────────────────────────
+    if schedule_mode == "From file (Excel)":
         st.caption(
-            f"On: {', '.join(active_months) if active_months else '—'}  "
-            f"| Hours: {h_start:02d}:00 – {h_end:02d}:00  "
-            f"| Tf1 = {Tf1_val} °C  | mw = {mw_val} kg/s per circuit"
+            "Upload an Excel file with columns `Tin_C` and `mw_kgs` "
+            "(one row per timestep). All circuits share the same profile."
         )
-
-        return dict(
-            bc_mode="schedule",
-            Tf1_val=Tf1_val,
-            mw_val=mw_val,
-            active_months=active_months,
-            active_hours=(h_start, h_end),
-        )
-
-    else:  # From file
-        st.caption(
-            "Upload an Excel file with one sheet per circuit (or one sheet with columns "
-            "`Tin_C` and `mw_kgs` if all circuits share the same profile). "
-            "Rows = timesteps."
-        )
-        bc_file = st.file_uploader(
-            "Boundary conditions file (.xlsx)",
-            type=["xlsx"],
-            key="bc_file",
-        )
-
+        bc_file = st.file_uploader("Inlet profile (.xlsx)", type=["xlsx"], key="bc_file")
         if bc_file is None:
             st.info("Upload a file to continue.")
-            return dict(bc_mode="file", bc_file=None)
+            return dict(schedule_mode="file", bc_file_path=None)
 
-        # preview
-        import tempfile, pandas as pd
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        import tempfile as _tmp, pandas as _pd
+        with _tmp.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp.write(bc_file.read())
             tmp_path = tmp.name
-        bc_file.seek(0)
 
-        xl      = pd.ExcelFile(tmp_path)
-        sheets  = xl.sheet_names
-        st.caption(f"Sheets found: {', '.join(sheets)}")
+        xl     = _pd.ExcelFile(tmp_path)
+        sheets = xl.sheet_names
+        st.caption(f"Sheets: {', '.join(sheets)}")
+        col_tf1 = st.selectbox("Column — Tf1 [°C]",
+                               ["Tin_C", "Tin_C_clean"] + sheets, key="bc_col_tf1")
+        col_mw  = st.selectbox("Column — mw [kg/s]",
+                               ["mw_kgs", "mw_kgs_series_norm"] + sheets, key="bc_col_mw")
+        same    = st.checkbox("All circuits share the same profile", value=True)
 
-        col1_name = st.selectbox("Column for Tf1 [°C]",  ["Tin_C", "Tin_C_clean"] + sheets, key="bc_col_tf1")
-        col2_name = st.selectbox("Column for mw [kg/s]", ["mw_kgs", "mw_kgs_series_norm"] + sheets, key="bc_col_mw")
+        return dict(schedule_mode="file",
+                    bc_file_path=tmp_path, col_tf1=col_tf1, col_mw=col_mw,
+                    same_profile=same)
 
-        same_profile = st.checkbox(
-            "All circuits share the same profile (tile across inlets)",
-            value=True,
-        )
+    # ── Calendar schedule ──────────────────────────────────────────────────
+    if mode == "Single BHE":
+        n_circuits     = 1
+        circuit_labels = ["Circuit 0"]
+    elif mode == "Multi BHE — Parallel":
+        n_circuits     = field_p.get("n_bhes", 1)
+        circuit_labels = [f"BHE {i}" for i in range(n_circuits)]
+    else:
+        n_circuits     = field_p.get("n_groups", 1)
+        circuit_labels = [f"Group {i}" for i in range(n_circuits)]
 
-        return dict(
-            bc_mode="file",
-            bc_file_path=tmp_path,
-            col_tf1=col1_name,
-            col_mw=col2_name,
-            same_profile=same_profile,
-        )
+    st.subheader("Operating schedule per circuit")
+    st.caption(
+        "For each circuit: set Tf1 and mw, then define one or more operating periods. "
+        "Each period has a **date range** (from → to) and a **daily schedule** (hour on → hour off). "
+        "Outside all periods the pump is off (mw = 0)."
+    )
+
+    # init session state
+    key_p = "plant_periods"
+    if key_p not in st.session_state:
+        st.session_state[key_p] = {}
+    for i in range(n_circuits):
+        if i not in st.session_state[key_p]:
+            st.session_state[key_p][i] = []
+
+    circuits_out = []
+
+    for i, label in enumerate(circuit_labels):
+        with st.expander(f"**{label}**", expanded=(i == 0)):
+            col1, col2 = st.columns(2)
+            with col1:
+                tf1_v = st.number_input("Tf1 [°C]",  value=2.0,    key=f"tf1_{i}")
+            with col2:
+                mw_v  = st.number_input("mw [kg/s]", value=0.1657, key=f"mw_{i}")
+
+            st.markdown("**Operating periods**")
+            periods_i = st.session_state[key_p][i]
+            to_delete = []
+
+            for j, (pd_start, pd_end, h_on, h_off) in enumerate(periods_i):
+                st.markdown(f"*Period {j+1}*")
+                c1, c2 = st.columns(2)
+                pd_start_new = c1.date_input("From date", value=pd_start,
+                                              key=f"pds_{i}_{j}")
+                pd_end_new   = c2.date_input("To date",   value=pd_end,
+                                              key=f"pde_{i}_{j}")
+                c3, c4, c5 = st.columns([2, 2, 1])
+                h_on_new  = int(c3.number_input("Daily start [h]", value=h_on,
+                                                 min_value=0, max_value=23,
+                                                 key=f"hon_{i}_{j}"))
+                h_off_new = int(c4.number_input("Daily end [h]",   value=h_off,
+                                                 min_value=1, max_value=24,
+                                                 key=f"hoff_{i}_{j}"))
+                if c5.button("✕", key=f"del_{i}_{j}"):
+                    to_delete.append(j)
+                else:
+                    periods_i[j] = (pd_start_new, pd_end_new, h_on_new, h_off_new)
+
+                st.caption(
+                    f"{pd_start_new.strftime('%d %b %Y')} → "
+                    f"{pd_end_new.strftime('%d %b %Y')}  |  "
+                    f"daily {h_on_new:02d}:00–{h_off_new:02d}:00"
+                )
+                st.divider()
+
+            for j in reversed(to_delete):
+                periods_i.pop(j)
+
+            if st.button("＋ Add period", key=f"add_{i}"):
+                default_end = sim_start + _dt.timedelta(days=90)
+                periods_i.append((sim_start, default_end, 0, 24))
+
+            st.session_state[key_p][i] = periods_i
+
+            if not periods_i:
+                st.caption("No periods defined — circuit always off.")
+
+            circuits_out.append(dict(
+                Tf1_val=tf1_v,
+                mw_val=mw_v,
+                periods=list(periods_i),
+            ))
+
+    return dict(
+        schedule_mode="calendar",
+        circuits=circuits_out,
+    )

@@ -24,9 +24,8 @@ from ui_inputs import (
     render_env_tab,
     render_sim_tab,
     render_field_tab,
-    render_bc_tab,
-    _make_schedule,
-    MONTHS,
+    render_plant_schedule_tab,
+    _build_mw_tf1_from_schedule,
 )
 from ui_results import (
     render_ground_surface,
@@ -79,13 +78,13 @@ if mode in ["Multi BHE — Parallel", "Multi BHE — Series"]:
 
 if mode == "Single BHE":
     tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_bc = st.tabs(
-        ["Ground", "Borehole", "Fluid", "Environment", "Simulation", "Boundary Conditions"]
+        ["Ground", "Borehole", "Fluid", "Environment", "Simulation", "Plant Schedule"]
     )
     tab_field = None
 else:
     tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_field, tab_bc = st.tabs(
         ["Ground", "Borehole", "Fluid", "Environment", "Simulation",
-         "Field Layout", "Boundary Conditions"]
+         "Field Layout", "Plant Schedule"]
     )
 
 with tab_ground:
@@ -116,12 +115,12 @@ elif mode == "Multi BHE — Series":
     _n_inlets_est = field_p.get("n_groups", 1)
 
 with tab_bc:
-    bc_p = render_bc_tab(
+    bc_p = render_plant_schedule_tab(
         mode=mode,
-        n_steps_ref=sim_p["n_steps"],
-        dt_ref=sim_p["dt"],
-        n_inlets_ref=_n_inlets_est,
+        n_steps=sim_p["n_steps"],
+        dt_s=sim_p["dt"],
         field_p=field_p,
+        sim_start=env_p.get("sim_start"),
     )
 
 # =============================================================================
@@ -138,7 +137,7 @@ if run:
     if mode in ["Multi BHE — Parallel", "Multi BHE — Series"] and spacing_file is None:
         st.error("Please upload the field layout file (spacing.xlsx).")
         st.stop()
-    if bc_p.get("bc_mode") == "file" and bc_p.get("bc_file_path") is None:
+    if bc_p.get("schedule_mode") == "file" and bc_p.get("bc_file_path") is None:
         st.error("Please upload the boundary conditions file.")
         st.stop()
 
@@ -203,7 +202,7 @@ if run:
         env_input = EnvironmentalTimeSeries.from_excel(Tm=env_p["Tm"], path=env_path)
         env_props = EnvironmentalProperties(
             R_ext=env_p["R_ext"], absorptance=env_p["absorptance"], eps=env_p["eps"],
-            At=env_p["At"], tau=0, tau_y=env_p["tau_y"], tau_shift=env_p["tau_shift"],
+            At=env_p["At"], tau=env_p["tau"], tau_y=env_p["tau_y"], tau_shift=env_p["tau_shift"],
         )
 
         # --- field ---
@@ -241,27 +240,20 @@ if run:
             n_inlets = field_p["n_groups"]
 
         # --- build Tf1_arr and mw_arr ---
-        if bc_p["bc_mode"] == "schedule":
-            Tf1_arr, mw_arr = _make_schedule(
-                n_steps=n_steps, dt=dt,
-                active_months=bc_p["active_months"],
-                active_hours=bc_p["active_hours"],
-                Tf1_val=bc_p["Tf1_val"],
-                mw_val=bc_p["mw_val"],
-                n_inlets=n_inlets,
+        if bc_p["schedule_mode"] == "calendar":
+            Tf1_arr, mw_arr = _build_mw_tf1_from_schedule(
+                n_steps=n_steps,
+                dt_s=dt,
+                sim_start=env_p["sim_start"],
+                circuits=bc_p["circuits"],
             )
         else:
             # from file
             df_bc = pd.read_excel(bc_p["bc_file_path"])
             tf1_raw = df_bc[bc_p["col_tf1"]].to_numpy()[:n_steps]
             mw_raw  = df_bc[bc_p["col_mw"]].to_numpy()[:n_steps]
-            if bc_p["same_profile"]:
-                Tf1_arr = np.tile(tf1_raw, (n_inlets, 1))
-                mw_arr  = np.tile(mw_raw,  (n_inlets, 1))
-            else:
-                # one sheet per inlet — fall back to tiling if not enough columns
-                Tf1_arr = np.tile(tf1_raw, (n_inlets, 1))
-                mw_arr  = np.tile(mw_raw,  (n_inlets, 1))
+            Tf1_arr = np.tile(tf1_raw, (n_inlets, 1))
+            mw_arr  = np.tile(mw_raw,  (n_inlets, 1))
 
         # --- simulation ---
         sim_kwargs = dict(

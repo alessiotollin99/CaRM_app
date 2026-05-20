@@ -1,0 +1,37 @@
+<svg width="100%" viewBox="0 0 680 600" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Single U-tube BHE — cross section</title>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<circle cx="310" cy="295" r="192" fill="#ECEAE4" stroke="#2C2C2A" stroke-width="1.5"/>
+<circle cx="310" cy="295" r="92" fill="none" stroke="#2C2C2A" stroke-width="1.4" stroke-dasharray="6 4"/>
+<circle cx="218" cy="295" r="46" fill="#ECEAE4" stroke="#2C2C2A" stroke-width="1.5"/>
+<circle cx="218" cy="295" r="30" fill="#F8F7F4" stroke="#2C2C2A" stroke-width="1"/>
+<line x1="218" y1="277" x2="218" y2="311" stroke="#2C2C2A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<circle cx="402" cy="295" r="46" fill="#ECEAE4" stroke="#2C2C2A" stroke-width="1.5"/>
+<circle cx="402" cy="295" r="30" fill="#F8F7F4" stroke="#2C2C2A" stroke-width="1"/>
+<line x1="402" y1="313" x2="402" y2="279" stroke="#2C2C2A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M172,295 L164,295 L161,283 L155,307 L149,283 L143,307 L137,283 L131,307 L125,295 L118,295"
+      fill="none" stroke="#2C2C2A" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="143" y="274" text-anchor="middle" font-size="13" fill="#2C2C2A" font-family="sans-serif" font-style="italic">R</text>
+<text x="154" y="278" font-size="9" fill="#2C2C2A" font-family="sans-serif">p0</text>
+<path d="M448,295 L456,295 L459,283 L465,307 L471,283 L477,307 L483,283 L489,307 L495,295 L502,295"
+      fill="none" stroke="#2C2C2A" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="477" y="274" text-anchor="middle" font-size="13" fill="#2C2C2A" font-family="sans-serif" font-style="italic">R</text>
+<text x="488" y="278" font-size="9" fill="#2C2C2A" font-family="sans-serif">p0</text>
+<path d="M264,295 L271,295 L274,281 L280,309 L286,281 L292,309 L298,281 L304,309 L310,281 L316,309 L322,281 L328,309 L334,295 L356,295"
+      fill="none" stroke="#2C2C2A" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="310" y="264" text-anchor="middle" font-size="13" fill="#2C2C2A" font-family="sans-serif" font-style="italic">R</text>
+<text x="321" y="268" font-size="9" fill="#2C2C2A" font-family="sans-serif">ppB</text>
+<text x="218" y="296" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#2C2C2A" font-family="sans-serif">1</text>
+<text x="402" y="296" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="#2C2C2A" font-family="sans-serif">2</text>
+<text x="310" y="120" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#2C2C2A" font-family="sans-serif">Shell</text>
+<text x="310" y="358" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#2C2C2A" font-family="sans-serif">Core</text>
+<line x1="218" y1="410" x2="402" y2="410" stroke="#2C2C2A" stroke-width="0.8" opacity="0.8"/>
+<line x1="218" y1="402" x2="218" y2="418" stroke="#2C2C2A" stroke-width="0.8" opacity="0.8"/>
+<line x1="402" y1="402" x2="402" y2="418" stroke="#2C2C2A" stroke-width="0.8" opacity="0.8"/>
+<text x="310" y="433" text-anchor="middle" font-size="12" fill="#2C2C2A" font-family="sans-serif">spacing</text>
+<text x="310" y="38" text-anchor="middle" font-size="15" font-weight="500" fill="#1d1d1f" font-family="sans-serif">Single U-tube BHE — cross section</text>
+</svg>
