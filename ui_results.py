@@ -333,7 +333,7 @@ def render_timeseries(T_history, simulation, n_bhes, nsup, nground,
     Tfout = T_history[1:, bhe_ts, nsup + nground + (props_b.n_equations - 1)]
     Tfin  = Tf1_arr[bhe_ts if Tf1_arr.shape[0] > bhe_ts else 0, :]
     mw_ts = mw_arr[bhe_ts if mw_arr.shape[0] > bhe_ts else 0, :]
-    q_ts  = np.where(mw_ts != 0, mw_ts * cp_w * (Tfin - Tfout), np.nan)
+    q_ts  = np.where(mw_ts != 0, mw_ts * cp_w * (Tfin - Tfout), 0.0)
 
     T_shell_mean = T_history[1:, bhe_ts, slices["shell"]].mean(axis=1)
     T_bc_mean    = simulation.T_bc[:, bhe_ts, :].mean(axis=1)

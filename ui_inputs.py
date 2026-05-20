@@ -420,8 +420,7 @@ def _build_mw_tf1_from_schedule(
     sim_start_dt = _dt.datetime(sim_start.year, sim_start.month, sim_start.day, 0)
 
     for i, circ in enumerate(circuits):
-        Tf1_arr[i, :] = circ["Tf1_val"]
-        for (pd_start, pd_end, h_on, h_off) in circ["periods"]:
+        for (pd_start, pd_end, h_on, h_off, tf1_period) in circ["periods"]:
             # iterate day by day within the period
             day = pd_start
             while day <= pd_end:
@@ -430,7 +429,8 @@ def _build_mw_tf1_from_schedule(
                     delta_s = (t - sim_start_dt).total_seconds()
                     if 0 <= delta_s < n_steps * dt_s:
                         step = int(delta_s / dt_s)
-                        mw_arr[i, step] = circ["mw_val"]
+                        mw_arr[i, step]  = circ["mw_val"]
+                        Tf1_arr[i, step] = tf1_period
                 day += _dt.timedelta(days=1)
 
     return Tf1_arr, mw_arr
@@ -513,39 +513,38 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
 
     for i, label in enumerate(circuit_labels):
         with st.expander(f"**{label}**", expanded=(i == 0)):
-            col1, col2 = st.columns(2)
-            with col1:
-                tf1_v = st.number_input("Tf1 [°C]",  value=2.0,    key=f"tf1_{i}")
-            with col2:
-                mw_v  = st.number_input("mw [kg/s]", value=0.1657, key=f"mw_{i}")
+            mw_v = st.number_input("mw [kg/s]", value=0.1657, key=f"mw_{i}")
 
             st.markdown("**Operating periods**")
             periods_i = st.session_state[key_p][i]
             to_delete = []
 
-            for j, (pd_start, pd_end, h_on, h_off) in enumerate(periods_i):
+            for j, (pd_start, pd_end, h_on, h_off, tf1_p) in enumerate(periods_i):
                 st.markdown(f"*Period {j+1}*")
-                c1, c2 = st.columns(2)
+                c1, c2, c3 = st.columns(3)
                 pd_start_new = c1.date_input("From date", value=pd_start,
                                               key=f"pds_{i}_{j}")
                 pd_end_new   = c2.date_input("To date",   value=pd_end,
                                               key=f"pde_{i}_{j}")
-                c3, c4, c5 = st.columns([2, 2, 1])
-                h_on_new  = int(c3.number_input("Daily start [h]", value=h_on,
+                tf1_p_new = float(c3.number_input("Tf1 [°C]", value=tf1_p,
+                                                   key=f"tf1p_{i}_{j}"))
+                c4, c5, c6 = st.columns([2, 2, 1])
+                h_on_new  = int(c4.number_input("Daily start [h]", value=h_on,
                                                  min_value=0, max_value=23,
                                                  key=f"hon_{i}_{j}"))
-                h_off_new = int(c4.number_input("Daily end [h]",   value=h_off,
+                h_off_new = int(c5.number_input("Daily end [h]",   value=h_off,
                                                  min_value=1, max_value=24,
                                                  key=f"hoff_{i}_{j}"))
-                if c5.button("✕", key=f"del_{i}_{j}"):
+                if c6.button("✕", key=f"del_{i}_{j}"):
                     to_delete.append(j)
                 else:
-                    periods_i[j] = (pd_start_new, pd_end_new, h_on_new, h_off_new)
+                    periods_i[j] = (pd_start_new, pd_end_new, h_on_new, h_off_new, tf1_p_new)
 
                 st.caption(
                     f"{pd_start_new.strftime('%d %b %Y')} → "
                     f"{pd_end_new.strftime('%d %b %Y')}  |  "
-                    f"daily {h_on_new:02d}:00–{h_off_new:02d}:00"
+                    f"daily {h_on_new:02d}:00–{h_off_new:02d}:00  |  "
+                    f"Tf1 = {tf1_p_new:.1f} °C"
                 )
                 st.divider()
 
@@ -554,7 +553,8 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
 
             if st.button("＋ Add period", key=f"add_{i}"):
                 default_end = sim_start + _dt.timedelta(days=90)
-                periods_i.append((sim_start, default_end, 0, 24))
+                default_tf1 = circuits_out[-1]["periods"][-1][4] if circuits_out and circuits_out[-1]["periods"] else 2.0
+                periods_i.append((sim_start, default_end, 0, 24, default_tf1))
 
             st.session_state[key_p][i] = periods_i
 
@@ -562,7 +562,6 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
                 st.caption("No periods defined — circuit always off.")
 
             circuits_out.append(dict(
-                Tf1_val=tf1_v,
                 mw_val=mw_v,
                 periods=list(periods_i),
             ))
