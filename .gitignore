@@ -217,5 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+<<<<<<< HEAD
 #results
+=======
+# results
+>>>>>>> 988d772c987e62bfcd016c4de8e47ac4bced077a
 results/
