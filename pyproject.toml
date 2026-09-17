@@ -1,0 +1,27 @@
+[project]
+name = "carm-app"
+version = "0.1.0"
+description = "Streamlit web interface for the pyCaRM borehole heat exchanger simulation library"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "streamlit>=1.50",
+    "plotly>=6.0",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "numpy>=2.0",
+    "CoolProp>=7.0",
+]
+
+# The carm library itself is a separate sibling repo (../CaRM) and is not
+# declared here since pip's native pyproject support doesn't resolve
+# relative local path dependencies reliably. Install it separately:
+#   pip install -e ../CaRM
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app", "config_io", "defaults", "ui_inputs", "ui_results"]
