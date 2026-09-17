@@ -300,7 +300,8 @@ def render_borehole(T_history, n_bhes, slices, depth, n_steps, dt,
         sl_key = qty_map[label]
         vals   = T_history[step_bore, bhe_bore, slices[sl_key]]
         fig.add_trace(go.Scatter(
-            x=vals, y=depth, mode="lines", name=label,
+            x=vals, y=depth, mode="lines+markers", name=label,
+            marker=dict(size=5),
             hovertemplate=f"{label} = %{{x:.3f}} °C<br>z = %{{y:.3f}} m<extra></extra>",
         ))
         df_data[f"{label} [°C]"] = vals
@@ -379,101 +380,156 @@ def render_timeseries(T_history, simulation, n_bhes, nsup, nground,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SUB-TAB: 3-D Field
+# SUB-TAB: Ground Energy
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_3d(T_history, model, n_bhes, nsup, nground, slices,
-              depth, n_mesh, m_mesh, n_steps, D0):
-    st.subheader("3-D field visualisation")
-    st.caption("All BHEs shown. Selected BHE shows ground slice when 'T_ground' is chosen.")
+def render_ground_energy_balance(simulation, sim_start, dt, n_steps, heat_flux: bool):
+    """
+    Monthly ground energy balance, for both simulation modes.
 
-    col1, col2, col3 = st.columns(3)
-    step_3d   = col1.slider("Timestep", 1, n_steps, n_steps // 2, key="3d_step")
-    focus_bhe = col2.selectbox("Focus BHE", list(range(n_bhes)), key="3d_bhe")
-    quantity  = col3.selectbox("Quantity", ["T_shell", "T_ground"])
+    heat_flux mode: the ground-side load already accounts for the heat pump
+    (COP/EER) via ``simulation.Q_ground`` [W] — steps where the building load
+    was zero leave it at NaN, treated here as zero exchange.
 
-    N_cyl  = 36
-    theta  = np.linspace(0, 2 * np.pi, N_cyl)
-    r_bore = D0 / 2.0
+    Standard mode: no such quantity exists, so it is derived the same way
+    the solver itself derives it internally — m·cp·(Tf1 − Tfout_prev), i.e.
+    ``simulation.q_nbhes`` [W] summed over all boreholes.
 
-    # global colour range
-    if quantity == "T_shell":
-        T_ref = np.array([T_history[step_3d, b, slices["shell"]] for b in range(n_bhes)])
-        cmin, cmax = float(T_ref.min()), float(T_ref.max())
-    else:
-        T_ref = T_history[step_3d, focus_bhe, nsup: nsup + nground]
-        cmin, cmax = float(T_ref.min()), float(T_ref.max())
-
-    # BHE positions
-    if hasattr(model, "field") and model.field is not None:
-        bhe_x = [model.field.boreholes[i].x for i in range(n_bhes)]
-        bhe_y = [model.field.boreholes[i].y for i in range(n_bhes)]
-    else:
-        bhe_x = [0.0]
-        bhe_y = [0.0]
-
-    fig = go.Figure()
-
-    for b in range(n_bhes):
-        bx, by     = bhe_x[b], bhe_y[b]
-        is_focus   = (b == focus_bhe)
-        T_bhe      = T_history[step_3d, b, slices["shell"]]
-
-        # cylinder: z goes from 0 (surface) to depth[-1] (bottom) — depth array is negative
-        Z_cyl = np.outer(depth,    np.ones(N_cyl))
-        X_cyl = bx + r_bore * np.outer(np.ones(m_mesh), np.cos(theta))
-        Y_cyl = by + r_bore * np.outer(np.ones(m_mesh), np.sin(theta))
-        C_cyl = np.outer(T_bhe,   np.ones(N_cyl))
-
-        fig.add_trace(go.Surface(
-            x=X_cyl, y=Y_cyl, z=Z_cyl,
-            surfacecolor=C_cyl,
-            colorscale="RdYlGn_r",
-            cmin=cmin, cmax=cmax,
-            showscale=(b == 0),
-            colorbar=dict(title="T [°C]", thickness=15, x=1.02) if b == 0 else None,
-            opacity=1.0 if is_focus else 0.5,
-            name=f"BHE {b}",
-            hovertemplate=f"BHE {b}<br>z = %{{z:.2f}} m<br>T = %{{customdata:.3f}} °C<extra></extra>",
-            customdata=C_cyl,
-        ))
-
-    # ground slice for focus BHE
-    if quantity == "T_ground":
-        r0_f   = model.ground[0].r0
-        rn_f   = model.ground[focus_bhe].rn
-        radius = np.linspace(r0_f, rn_f, n_mesh)
-        bx, by = bhe_x[focus_bhe], bhe_y[focus_bhe]
-
-        T_gs   = T_history[step_3d, focus_bhe, nsup: nsup + nground].reshape(m_mesh, n_mesh)
-        Z_g    = np.outer(depth, np.ones(n_mesh))
-        X_g    = bx + np.outer(np.ones(m_mesh), radius)
-        Y_g    = by * np.ones_like(X_g)
-
-        fig.add_trace(go.Surface(
-            x=X_g, y=Y_g, z=Z_g,
-            surfacecolor=T_gs,
-            colorscale="RdYlGn_r",
-            cmin=cmin, cmax=cmax,
-            showscale=False,
-            opacity=0.85,
-            name=f"Ground BHE {focus_bhe}",
-            hovertemplate="r = %{x:.2f} m<br>z = %{z:.2f} m<br>T = %{customdata:.3f} °C<extra></extra>",
-            customdata=T_gs,
-        ))
-
-    fig.update_layout(
-        scene=dict(
-            xaxis_title="x [m]",
-            yaxis_title="y [m]",
-            zaxis=dict(
-                title="Depth [m]",
-                range=[float(depth[-1]), 0],  # 0 at top, negative bottom
-            ),
-            aspectmode="manual",
-            aspectratio=dict(x=1, y=1, z=3),
-        ),
-        margin=dict(t=40, b=10, l=10, r=10),
-        height=720,
+    Convention: positive = heat extracted from the ground (heating);
+    negative = heat injected into the ground (cooling).
+    """
+    st.subheader("Monthly ground energy balance")
+    st.caption(
+        "Energy exchanged with the ground, aggregated by month. Positive = "
+        "extracted from the ground (heating); negative = injected into the "
+        "ground (cooling)."
     )
+
+    if heat_flux:
+        q_ground_w = np.nan_to_num(simulation.Q_ground, nan=0.0)
+    else:
+        q_ground_w = simulation.q_nbhes.sum(axis=1)
+
+    extraction_w = -q_ground_w  # flip sign to the "extraction positive" convention
+    energy_kwh = extraction_w * dt / 3.6e6
+
+    if sim_start is None:
+        st.info("No simulation start date available — showing energy per step instead of per month.")
+        df = pd.DataFrame({"energy [kWh]": energy_kwh})
+        df.index.name = "step"
+    else:
+        dates = pd.Timestamp(sim_start) + pd.to_timedelta(np.arange(n_steps) * dt, unit="s")
+        df = pd.DataFrame({"energy [kWh]": energy_kwh}, index=dates)
+        df = df.resample("MS").sum()
+        df.index.name = "month"
+
+    colors = ["seagreen" if v >= 0 else "indianred" for v in df["energy [kWh]"]]
+    fig = go.Figure(go.Bar(x=df.index, y=df["energy [kWh]"], marker_color=colors))
+    fig.update_layout(**LAYOUT, xaxis_title="Month" if sim_start is not None else "Step",
+                      yaxis_title="Energy [kWh]", height=380)
     st.plotly_chart(fig, use_container_width=True)
+
+    c1, c2 = st.columns(2)
+    c1.metric("Total extracted [kWh]", f"{df['energy [kWh]'].clip(lower=0).sum():,.0f}")
+    c2.metric("Total injected [kWh]", f"{-df['energy [kWh]'].clip(upper=0).sum():,.0f}")
+
+    st.dataframe(df, use_container_width=True)
+    _download_row(df, "Monthly ground energy", "monthly_ground_energy")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUB-TAB: Grout Properties
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _irrigation_windows(active_mask: np.ndarray) -> list:
+    """Contiguous (start_idx, end_idx) runs where active_mask is True."""
+    windows = []
+    start = None
+    for i, active in enumerate(active_mask):
+        if active and start is None:
+            start = i
+        elif not active and start is not None:
+            windows.append((start, i - 1))
+            start = None
+    if start is not None:
+        windows.append((start, len(active_mask) - 1))
+    return windows
+
+
+def _shade_windows(fig: go.Figure, time_h: np.ndarray, windows: list) -> None:
+    for i0, i1 in windows:
+        fig.add_vrect(
+            x0=time_h[i0], x1=time_h[i1],
+            fillcolor="lightblue", opacity=0.15, layer="below", line_width=0,
+        )
+
+
+def render_grout_properties(simulation, time_h, D0, Lbore):
+    st.subheader("Variable grout properties — soil moisture")
+    st.caption(
+        "Grout thermal conductivity, heat capacity, and density evolve with "
+        "the soil moisture content, driven by irrigation (shaded bands) and "
+        "gravity drainage/evaporation."
+    )
+
+    varprops = simulation.bh_p_varprops
+    V     = np.pi * (D0 ** 2) / 4.0 * Lbore
+    theta = simulation.wc_history_borehole / V
+    water_input = np.asarray(varprops.water_input)[: len(time_h)]
+
+    windows = _irrigation_windows(water_input > 0)
+
+    # k / cp / rho evolution
+    col1, col2, col3 = st.columns(3)
+    specs = [
+        (col1, "Thermal conductivity k", simulation.k_borehole_history, "W/(m K)", "royalblue"),
+        (col2, "Heat capacity cp",       simulation.cp_borehole_history, "J/(kg K)", "seagreen"),
+        (col3, "Density ρ",              simulation.rho_borehole_history, "kg/m³", "darkorange"),
+    ]
+    for col, label, arr, unit, color in specs:
+        fig = go.Figure(go.Scatter(
+            x=time_h, y=arr, mode="lines", line=dict(color=color),
+            hovertemplate=f"{label} = %{{y:.4g}} {unit}<br>t = %{{x:.1f}} h<extra></extra>",
+        ))
+        _shade_windows(fig, time_h, windows)
+        fig.update_layout(**LAYOUT, xaxis_title="Time [h]",
+                          yaxis_title=f"{label} [{unit}]", height=320)
+        col.plotly_chart(fig, use_container_width=True)
+
+    # volumetric water content, with residual/saturated bounds
+    st.markdown("**Volumetric water content**")
+    fig_theta = go.Figure()
+    fig_theta.add_trace(go.Scatter(
+        x=time_h, y=theta, mode="lines", name="θ", line=dict(color="teal"),
+        hovertemplate="θ = %{y:.4f}<br>t = %{x:.1f} h<extra></extra>",
+    ))
+    fig_theta.add_hline(y=varprops.theta_r_loc, line_dash="dash", line_color="gray",
+                        annotation_text="θr (residual)", annotation_position="bottom right")
+    fig_theta.add_hline(y=varprops.theta_s_loc, line_dash="dash", line_color="gray",
+                        annotation_text="θs (saturated)", annotation_position="top right")
+    _shade_windows(fig_theta, time_h, windows)
+    fig_theta.update_layout(**LAYOUT, xaxis_title="Time [h]", yaxis_title="θ [-]", height=340)
+    st.plotly_chart(fig_theta, use_container_width=True)
+
+    # irrigation input
+    st.markdown("**Irrigation input**")
+    fig_irr = go.Figure(go.Scatter(
+        x=time_h, y=water_input, mode="lines", fill="tozeroy",
+        line=dict(color="dodgerblue"),
+        hovertemplate="water_input = %{y:.3e} m/s<br>t = %{x:.1f} h<extra></extra>",
+    ))
+    _shade_windows(fig_irr, time_h, windows)
+    fig_irr.update_layout(**LAYOUT, xaxis_title="Time [h]",
+                          yaxis_title="water_input [m/s]", height=260)
+    st.plotly_chart(fig_irr, use_container_width=True)
+
+    df = pd.DataFrame({
+        "k [W/(m K)]":       simulation.k_borehole_history,
+        "cp [J/(kg K)]":     simulation.cp_borehole_history,
+        "rho [kg/m3]":       simulation.rho_borehole_history,
+        "theta [-]":         theta,
+        "water_input [m/s]": water_input,
+    }, index=time_h)
+    df.index.name = "time [h]"
+    st.dataframe(df, use_container_width=True)
+    _download_row(df, "Grout properties", "grout_properties")

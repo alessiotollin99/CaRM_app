@@ -72,3 +72,25 @@ BOREHOLE_DEFAULTS = dict(
     rho_0  = 1655.0,
     k0     = 1.83,
 )
+
+# =============================================================================
+# Variable grout properties (soil moisture / irrigation) defaults
+# Only meaningful for Helical BHEs — see carm.properties.BoreholeGeometry.
+# =============================================================================
+
+IRRIGATION_DEFAULTS = dict(
+    soil_type     = "sand",   # "sand" | "loam" | "clay"
+    D_irrigation  = 0.030,    # irrigation pipe diameter [m]
+    perf_fraction = 0.5,      # irrigation pipe perforation fraction [-]
+    water_rate    = 5.0e-5,   # default constant irrigation rate for a new period [m/s]
+)
+
+# =============================================================================
+# Heat flux mode defaults (building load driven, instead of Tf1 driven)
+# =============================================================================
+
+HEATFLUX_DEFAULTS = dict(
+    mw_value   = 0.1657,   # pump mass flow rate while a load period is active [kg/s]
+    Q_load     = 5000.0,   # default load for a new period, + = extraction/heating [W]
+    T_supply   = 45.0,     # default supply temperature for a new period [°C]
+)
