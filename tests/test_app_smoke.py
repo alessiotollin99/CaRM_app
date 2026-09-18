@@ -35,6 +35,12 @@ def test_single_bhe_default_run_completes():
     at.run()
     assert not at.exception, f"initial render raised: {at.exception}"
 
+    input_tab_labels = [t.label for t in at.tabs[:6]]
+    assert input_tab_labels == [
+        "1 Ground", "2 Borehole", "3 Fluid", "4 Environment", "5 Simulation",
+        "6 Plant Schedule",
+    ], "expected numbered input tab labels with no checkmarks on a fresh load"
+
     env_uploader = _find(at.file_uploader, "Environmental data")
     env_uploader.set_value((
         "input_env.xlsx",

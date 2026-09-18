@@ -47,6 +47,7 @@ from carm import FieldInput, Fluid, GroundGeometry, GroundMesh
 from carm import PhysicalModel, Simulation
 
 from config_io import serialize_config, apply_config
+from tab_progress import build_tab_labels
 
 # =============================================================================
 # Page config
@@ -145,16 +146,12 @@ if mode in ["Multi BHE — Parallel", "Multi BHE — Series"]:
 # Input tabs  — Field Layout shown conditionally
 # =============================================================================
 
+input_tab_labels = build_tab_labels(st.session_state, mode)
 if mode == "Single BHE":
-    tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_bc = st.tabs(
-        ["Ground", "Borehole", "Fluid", "Environment", "Simulation", "Plant Schedule"]
-    )
+    tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_bc = st.tabs(input_tab_labels)
     tab_field = None
 else:
-    tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_field, tab_bc = st.tabs(
-        ["Ground", "Borehole", "Fluid", "Environment", "Simulation",
-         "Field Layout", "Plant Schedule"]
-    )
+    tab_ground, tab_bore, tab_fluid, tab_env, tab_sim, tab_field, tab_bc = st.tabs(input_tab_labels)
 
 with tab_ground:
     ground_p = render_ground_tab()
