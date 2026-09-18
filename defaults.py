@@ -3,6 +3,8 @@
 Default values and lookup tables for CaRM App.
 """
 
+import datetime as dt
+
 # =============================================================================
 # Surface material presets  (absorptance, emissivity)
 # =============================================================================
@@ -73,12 +75,22 @@ BOREHOLE_DEFAULTS = dict(
     k0     = 1.83,
 )
 
+# Borehole diameter D0 needs more room than BOREHOLE_DEFAULTS["D0"] for some
+# pipe types — keyed by pipe_type, looked up in render_borehole_tab.
+D0_PIPE_TYPE_OVERRIDES = {
+    # Helical coils need more room than the generic default: with
+    # HELICAL_DEFAULTS (rih=0.19), D0 must be > 2*(rih+Dpi2+2*pipe_thick)
+    # ~ 0.44 m, matching the D0=0.5 used in CaRM's own Helical examples.
+    "Helical": 0.5,
+}
+
 # =============================================================================
 # Variable grout properties (soil moisture / irrigation) defaults
 # Only meaningful for Helical BHEs — see carm.properties.BoreholeGeometry.
 # =============================================================================
 
 IRRIGATION_DEFAULTS = dict(
+    enabled       = False,
     soil_type     = "sand",   # "sand" | "loam" | "clay"
     D_irrigation  = 0.030,    # irrigation pipe diameter [m]
     perf_fraction = 0.5,      # irrigation pipe perforation fraction [-]
@@ -93,4 +105,88 @@ HEATFLUX_DEFAULTS = dict(
     mw_value   = 0.1657,   # pump mass flow rate while a load period is active [kg/s]
     Q_load     = 5000.0,   # default load for a new period, + = extraction/heating [W]
     T_supply   = 45.0,     # default supply temperature for a new period [°C]
+)
+
+# =============================================================================
+# Ground tab defaults
+# =============================================================================
+
+GROUND_DEFAULTS = dict(
+    Tg         = 13.0,   # undisturbed ground temperature [°C]
+    L          = 100.0,  # borehole active length [m]
+    L_sup      = 1.0,    # surface layer thickness [m]
+    L_inf      = 10.0,   # bottom layer thickness [m]
+    rn         = 10.0,   # far-field radius [m]
+    n_mesh     = 20,      # radial mesh cells [-]
+    m_mesh     = 40,      # axial mesh cells [-]
+    m_mesh_sup = 4,       # axial cells, surface layer [-]
+    m_mesh_inf = 40,      # axial cells, bottom layer [-]
+    n_layers   = 1,       # number of stratification layers [-]
+)
+
+# Default values for a newly added ground-stratification layer row.
+GROUND_LAYER_DEFAULTS = dict(
+    k   = 1.83,    # thermal conductivity [W/m·K]
+    cp  = 947.0,   # specific heat [J/kg·K]
+    rho = 1900.0,  # density [kg/m³]
+    th  = 111.0,   # thickness [m]
+)
+
+# =============================================================================
+# Fluid tab defaults
+# =============================================================================
+
+FLUID_DEFAULTS = dict(
+    T_ref         = 10.0,  # reference temperature [°C]
+    concentration = 25,    # glycol concentration [%], only shown for non-water fluids
+)
+
+# =============================================================================
+# Environment tab defaults
+# =============================================================================
+
+ENV_DEFAULTS = dict(
+    # Fallbacks used when surface material is "Manual" (no preset in
+    # SURFACE_MATERIALS to draw absorptance/emittance from).
+    absorptance_manual = 0.70,
+    eps_manual          = 0.95,
+    Tm             = 13.0,               # mean annual air temperature [°C]
+    R_ext          = 0.04,               # external thermal resistance [m²·K/W]
+    At             = 10.0,               # annual temperature amplitude [K]
+    tau_y          = 365 * 24 * 3600,    # year duration [s]
+    tau_date       = dt.date(2024, 1, 1),   # simulation start date
+    tau_shift_date = dt.date(2024, 2, 14),  # date of minimum surface temperature
+)
+
+# =============================================================================
+# Simulation tab defaults
+# =============================================================================
+
+SIM_DEFAULTS = dict(
+    dt      = 3600,  # time step [s]
+    n_steps = 276,    # number of steps [-]
+)
+
+# =============================================================================
+# Field layout tab defaults (multi-BHE modes only)
+# =============================================================================
+
+FIELD_DEFAULTS = dict(
+    n_bhes = 9,
+    x_min  = -2.5,  # field x_min [m]
+    y_min  = -2.5,  # field y_min [m]
+    x_max  = 12.5,  # field x_max [m]
+    y_max  = 12.5,  # field y_max [m]
+)
+
+# =============================================================================
+# Plant schedule tab defaults (calendar-schedule mode)
+# =============================================================================
+
+PLANT_DEFAULTS = dict(
+    heat_flux_enabled = False,
+    same_profile       = True,   # "from file" mode: all circuits share one profile
+    # Same pump flow rate assumption as heat-flux mode's own default.
+    mw                 = HEATFLUX_DEFAULTS["mw_value"],
+    tf1_new_period     = 2.0,    # fallback Tf1 [°C] for a circuit's first-ever added period
 )

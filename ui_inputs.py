@@ -16,8 +16,16 @@ from defaults import (
     COAXIAL_DEFAULTS,
     HELICAL_DEFAULTS,
     BOREHOLE_DEFAULTS,
+    D0_PIPE_TYPE_OVERRIDES,
     IRRIGATION_DEFAULTS,
     HEATFLUX_DEFAULTS,
+    GROUND_DEFAULTS,
+    GROUND_LAYER_DEFAULTS,
+    FLUID_DEFAULTS,
+    ENV_DEFAULTS,
+    SIM_DEFAULTS,
+    FIELD_DEFAULTS,
+    PLANT_DEFAULTS,
 )
 
 
@@ -26,32 +34,34 @@ from defaults import (
 # =============================================================================
 
 def render_ground_tab():
+    d = GROUND_DEFAULTS
     st.subheader("Ground geometry & mesh")
     col1, col2 = st.columns(2)
     with col1:
-        Tg         = st.number_input("Undisturbed ground temperature Tg [°C]", value=13.0, key="cfg_Tg")
-        L          = st.number_input("Borehole active length L [m]", value=100.0, key="cfg_L")
-        L_sup      = st.number_input("Surface layer thickness L_sup [m]", value=1.0, key="cfg_L_sup")
-        L_inf      = st.number_input("Bottom layer thickness L_inf [m]", value=10.0, key="cfg_L_inf")
-        rn         = st.number_input("Far-field radius rn [m]", value=10.0,
+        Tg         = st.number_input("Undisturbed ground temperature Tg [°C]", value=d["Tg"], key="cfg_Tg")
+        L          = st.number_input("Borehole active length L [m]", value=d["L"], key="cfg_L")
+        L_sup      = st.number_input("Surface layer thickness L_sup [m]", value=d["L_sup"], key="cfg_L_sup")
+        L_inf      = st.number_input("Bottom layer thickness L_inf [m]", value=d["L_inf"], key="cfg_L_inf")
+        rn         = st.number_input("Far-field radius rn [m]", value=d["rn"],
                                      help="Leave at 0 to auto-compute for multi-BHE fields",
                                      min_value=0.0, key="cfg_rn")
     with col2:
-        n_mesh     = st.number_input("Radial mesh cells n_mesh [-]",        value=20, min_value=1, key="cfg_n_mesh")
-        m_mesh     = st.number_input("Axial mesh cells m_mesh [-]",         value=40, min_value=1, key="cfg_m_mesh")
-        m_mesh_sup = st.number_input("Axial cells surface layer [-]",       value=4,  min_value=1, key="cfg_m_mesh_sup")
-        m_mesh_inf = st.number_input("Axial cells bottom layer [-]",        value=40, min_value=1, key="cfg_m_mesh_inf")
+        n_mesh     = st.number_input("Radial mesh cells n_mesh [-]",        value=d["n_mesh"], min_value=1, key="cfg_n_mesh")
+        m_mesh     = st.number_input("Axial mesh cells m_mesh [-]",         value=d["m_mesh"], min_value=1, key="cfg_m_mesh")
+        m_mesh_sup = st.number_input("Axial cells surface layer [-]",       value=d["m_mesh_sup"],  min_value=1, key="cfg_m_mesh_sup")
+        m_mesh_inf = st.number_input("Axial cells bottom layer [-]",        value=d["m_mesh_inf"], min_value=1, key="cfg_m_mesh_inf")
 
     st.subheader("Ground stratification")
     st.caption("Each row: thermal conductivity, specific heat, density, layer thickness")
-    n_layers = st.number_input("Number of layers", value=1, min_value=1, max_value=10, key="cfg_n_layers")
+    n_layers = st.number_input("Number of layers", value=d["n_layers"], min_value=1, max_value=10, key="cfg_n_layers")
+    dl = GROUND_LAYER_DEFAULTS
     stratification = []
     for i in range(int(n_layers)):
         c1, c2, c3, c4 = st.columns(4)
-        k_s   = c1.number_input(f"k [W/m·K] — layer {i+1}",    value=1.83,   key=f"k_{i}")
-        cp_s  = c2.number_input(f"cp [J/kg·K] — layer {i+1}",  value=947.0,  key=f"cp_{i}")
-        rho_s = c3.number_input(f"ρ [kg/m³] — layer {i+1}",    value=1900.0, key=f"rho_{i}")
-        th_s  = c4.number_input(f"thick [m] — layer {i+1}",    value=111.0,  key=f"th_{i}")
+        k_s   = c1.number_input(f"k [W/m·K] — layer {i+1}",    value=dl["k"],   key=f"k_{i}")
+        cp_s  = c2.number_input(f"cp [J/kg·K] — layer {i+1}",  value=dl["cp"],  key=f"cp_{i}")
+        rho_s = c3.number_input(f"ρ [kg/m³] — layer {i+1}",    value=dl["rho"], key=f"rho_{i}")
+        th_s  = c4.number_input(f"thick [m] — layer {i+1}",    value=dl["th"],  key=f"th_{i}")
         stratification.append((k_s, cp_s, rho_s, th_s))
 
     return dict(
@@ -68,10 +78,7 @@ def render_ground_tab():
 
 def render_borehole_tab(pipe_type: str):
     d = BOREHOLE_DEFAULTS
-    # Helical coils need more room than the generic default: with the
-    # HELICAL_DEFAULTS below (rih=0.19), D0 must be > 2*(rih+Dpi2+2*pipe_thick)
-    # ~ 0.44 m, matching the D0=0.5 used in CaRM's own Helical examples.
-    d0_default = 0.5 if pipe_type == "Helical" else d["D0"]
+    d0_default = D0_PIPE_TYPE_OVERRIDES.get(pipe_type, d["D0"])
 
     st.subheader("Borehole geometry & grouting material")
     col1, col2 = st.columns(2)
@@ -210,7 +217,7 @@ def render_variable_props_section(pipe_type: str, D0: float) -> dict:
     st.subheader("Variable grout properties (soil moisture / irrigation)")
     vp_enabled = st.checkbox(
         "Enable variable grout properties",
-        value=False,
+        value=IRRIGATION_DEFAULTS["enabled"],
         help=(
             "Models grout thermal conductivity, heat capacity, and density as "
             "a function of soil moisture content, driven by irrigation and "
@@ -334,14 +341,14 @@ def render_fluid_tab():
     col1, col2 = st.columns(2)
     with col1:
         fluid_name    = st.selectbox("Fluid", ["Water", "Ethylene glycol", "Propylene glycol"], key="cfg_fluid_name")
-        T_ref         = st.number_input("Reference temperature [°C]", value=10.0,
+        T_ref         = st.number_input("Reference temperature [°C]", value=FLUID_DEFAULTS["T_ref"],
                                         help="Typically mean fluid temperature during operation",
                                         key="cfg_T_ref")
     with col2:
         concentration = 0.0
         if fluid_name != "Water":
             concentration = float(st.slider("Glycol concentration [%]",
-                                            min_value=0, max_value=60, value=25, step=1,
+                                            min_value=0, max_value=60, value=FLUID_DEFAULTS["concentration"], step=1,
                                             key="cfg_concentration"))
 
     fluid_str = _coolprop_string(fluid_name, concentration)
@@ -389,7 +396,7 @@ def render_env_tab():
     with col1:
         absorptance = st.number_input(
             "Surface absorptance [-]",
-            value=preset[0] if preset[0] is not None else 0.70,
+            value=preset[0] if preset[0] is not None else ENV_DEFAULTS["absorptance_manual"],
             min_value=0.0, max_value=1.0,
             disabled=(material != "Manual"),
             key="cfg_absorptance",
@@ -397,7 +404,7 @@ def render_env_tab():
     with col2:
         eps = st.number_input(
             "Surface emittance [-]",
-            value=preset[1] if preset[1] is not None else 0.95,
+            value=preset[1] if preset[1] is not None else ENV_DEFAULTS["eps_manual"],
             min_value=0.0, max_value=1.0,
             disabled=(material != "Manual"),
             key="cfg_eps",
@@ -411,16 +418,16 @@ def render_env_tab():
 
     col1, col2 = st.columns(2)
     with col1:
-        Tm    = st.number_input("Mean annual air temperature Tm [°C]", value=13.0, key="cfg_Tm")
-        R_ext = st.number_input("External thermal resistance R_ext [m²·K/W]", value=0.04, key="cfg_R_ext")
-        At    = st.number_input("Annual temperature amplitude At [K]", value=10.0, key="cfg_At")
-        tau_y = st.number_input("Year duration tau_y [s]", value=365 * 24 * 3600, key="cfg_tau_y")
+        Tm    = st.number_input("Mean annual air temperature Tm [°C]", value=ENV_DEFAULTS["Tm"], key="cfg_Tm")
+        R_ext = st.number_input("External thermal resistance R_ext [m²·K/W]", value=ENV_DEFAULTS["R_ext"], key="cfg_R_ext")
+        At    = st.number_input("Annual temperature amplitude At [K]", value=ENV_DEFAULTS["At"], key="cfg_At")
+        tau_y = st.number_input("Year duration tau_y [s]", value=ENV_DEFAULTS["tau_y"], key="cfg_tau_y")
     with col2:
         st.markdown("**Simulation start date (τ)**")
         st.caption("Seconds from Jan 1 to the simulation start — used as τ in EnvironmentalProperties.")
         tau_date = st.date_input(
             "Simulation start",
-            value=_dt_env.date(2024, 1, 1),
+            value=ENV_DEFAULTS["tau_date"],
             key="env_tau_date",
         )
         tau = _doy_seconds(tau_date)
@@ -430,7 +437,7 @@ def render_env_tab():
         st.caption("Typically mid-February — day when surface temperature reaches its annual minimum.")
         shift_date = st.date_input(
             "Date of minimum T",
-            value=_dt_env.date(2024, 2, 14),
+            value=ENV_DEFAULTS["tau_shift_date"],
             key="env_tau_shift_date",
         )
         tau_shift = _doy_seconds(shift_date)
@@ -451,8 +458,8 @@ def render_sim_tab():
     st.subheader("Simulation parameters")
     col1, col2 = st.columns(2)
     with col1:
-        dt      = st.number_input("Time step dt [s]",  value=3600, key="cfg_dt")
-        n_steps = st.number_input("Number of steps [-]", value=276, min_value=1, key="cfg_n_steps")
+        dt      = st.number_input("Time step dt [s]",  value=SIM_DEFAULTS["dt"], key="cfg_dt")
+        n_steps = st.number_input("Number of steps [-]", value=SIM_DEFAULTS["n_steps"], min_value=1, key="cfg_n_steps")
     return dict(dt=int(dt), n_steps=int(n_steps))
 
 
@@ -467,7 +474,8 @@ def render_field_tab(mode: str):
         return {}
 
     st.subheader("Field layout")
-    n_bhes = int(st.number_input("Total number of BHEs", value=9, min_value=1, key="cfg_field_n_bhes"))
+    d = FIELD_DEFAULTS
+    n_bhes = int(st.number_input("Total number of BHEs", value=d["n_bhes"], min_value=1, key="cfg_field_n_bhes"))
     layout = st.selectbox("Layout type", ["regular", "irregular"], key="cfg_field_layout")
 
     if layout == "regular" and mode == "Multi BHE — Series":
@@ -478,11 +486,11 @@ def render_field_tab(mode: str):
 
     col1, col2 = st.columns(2)
     with col1:
-        x_min = st.number_input("Field x_min [m]", value=-2.5, key="cfg_field_x_min")
-        y_min = st.number_input("Field y_min [m]", value=-2.5, key="cfg_field_y_min")
+        x_min = st.number_input("Field x_min [m]", value=d["x_min"], key="cfg_field_x_min")
+        y_min = st.number_input("Field y_min [m]", value=d["y_min"], key="cfg_field_y_min")
     with col2:
-        x_max = st.number_input("Field x_max [m]", value=12.5, key="cfg_field_x_max")
-        y_max = st.number_input("Field y_max [m]", value=12.5, key="cfg_field_y_max")
+        x_max = st.number_input("Field x_max [m]", value=d["x_max"], key="cfg_field_x_max")
+        y_max = st.number_input("Field y_max [m]", value=d["y_max"], key="cfg_field_y_max")
 
     out = dict(
         n_bhes=n_bhes, layout=layout,
@@ -706,7 +714,7 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
     heat_flux_enabled = st.checkbox(
         "Enable heat flux mode (drive the plant with a building load "
         "instead of a fixed inlet temperature)",
-        value=False, key="heat_flux_enabled",
+        value=PLANT_DEFAULTS["heat_flux_enabled"], key="heat_flux_enabled",
         help=(
             "When enabled, CaRM derives the inlet fluid temperature "
             "internally from a building heating/cooling load (Q_buildings) "
@@ -750,7 +758,7 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
                                ["Tin_C", "Tin_C_clean"] + sheets, key="bc_col_tf1")
         col_mw  = st.selectbox("Column — mw [kg/s]",
                                ["mw_kgs", "mw_kgs_series_norm"] + sheets, key="bc_col_mw")
-        same    = st.checkbox("All circuits share the same profile", value=True, key="cfg_bc_same_profile")
+        same    = st.checkbox("All circuits share the same profile", value=PLANT_DEFAULTS["same_profile"], key="cfg_bc_same_profile")
 
         return dict(schedule_mode="file",
                     bc_file_path=tmp_path, col_tf1=col_tf1, col_mw=col_mw,
@@ -786,7 +794,7 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
 
     for i, label in enumerate(circuit_labels):
         with st.expander(f"**{label}**", expanded=(i == 0)):
-            mw_v = st.number_input("mw [kg/s]", value=0.1657, key=f"mw_{i}")
+            mw_v = st.number_input("mw [kg/s]", value=PLANT_DEFAULTS["mw"], key=f"mw_{i}")
 
             st.markdown("**Operating periods**")
             periods_i = st.session_state[key_p][i]
@@ -826,7 +834,7 @@ def render_plant_schedule_tab(mode: str, n_steps: int, dt_s: int,
 
             if st.button("＋ Add period", key=f"add_{i}"):
                 default_end = sim_start + _dt.timedelta(days=90)
-                default_tf1 = circuits_out[-1]["periods"][-1][4] if circuits_out and circuits_out[-1]["periods"] else 2.0
+                default_tf1 = circuits_out[-1]["periods"][-1][4] if circuits_out and circuits_out[-1]["periods"] else PLANT_DEFAULTS["tf1_new_period"]
                 periods_i.append((sim_start, default_end, 0, 24, default_tf1))
 
             st.session_state[key_p][i] = periods_i

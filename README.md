@@ -55,6 +55,8 @@ pytest
 harness (uploads the example environmental file, runs a short Single-BHE
 simulation, checks it completes) — the main guard against pyCaRM API drift.
 `tests/test_config_io.py` covers the config save/load round-trip.
+`tests/test_default_values.py` pins every input tab's rendered default
+against the centralized values in `defaults.py`.
 
 ## Project structure
 
