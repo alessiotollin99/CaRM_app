@@ -44,6 +44,18 @@ This opens the app in your browser. From there:
 3. Fill in the input tabs (Ground, Borehole, Fluid, Environment, Simulation, Field Layout, Plant Schedule).
 4. Click **Run simulation** and inspect the results tabs.
 
+## Testing
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+`tests/test_app_smoke.py` drives the app end-to-end through Streamlit's `AppTest`
+harness (uploads the example environmental file, runs a short Single-BHE
+simulation, checks it completes) — the main guard against pyCaRM API drift.
+`tests/test_config_io.py` covers the config save/load round-trip.
+
 ## Project structure
 
 | File | Purpose |
